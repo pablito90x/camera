@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Cámara de verificación</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #f1f5f9; color: #1e293b; display: flex; justify-content: center; padding: 16px; }
+    .card { width: 100%; max-width: 520px; background: #fff; border: 1px solid #cbd5e1; border-radius: 16px; padding: 16px; box-shadow: 0 10px 25px rgba(0,0,0,.08); }
+    h1 { font-size: 16px; margin: 0 0 12px; }
+    .visor { position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0f172a; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    video, img { width: 100%; height: 100%; object-fit: cover; }
+    .hidden { display: none !important; }
+    .msg { position: absolute; color: #fff; font-size: 13px; font-weight: 600; text-align: center; padding: 12px; }
+    .fila { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; border: 0; border-radius: 12px; padding: 12px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer; }
+    button:disabled { background: #cbd5e1 !important; cursor: not-allowed; }
+    #btnCapturar { background: #2563eb; }
+    #btnEnviar { background: #059669; }
+    #btnRepetir { background: #475569; }
+    #estado { font-size: 12px; margin-top: 10px; font-weight: 600; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>📸 Foto de verificación</h1>
+    <div class="visor">
+      <video id="video" autoplay playsinline muted></video>
+      <img id="preview" class="hidden" alt="Vista previa">
+      <canvas id="canvas" class="hidden"></canvas>
+      <span id="msg" class="msg">Solicitando acceso a la cámara...</span>
+    </div>
+
+    <div class="fila">
+      <button type="button" id="btnCapturar" disabled>📸 Capturar</button>
+      <button type="button" id="btnRepetir" class="hidden">🔄 Repetir</button>
+      <button type="button" id="btnEnviar" class="hidden">✅ Usar esta foto</button>
+    </div>
+    <p id="estado"></p>
+  </div>
+
+  <script>
+    const video = document.getElementById('video');
+    const preview = document.getElementById('preview');
+    const canvas = document.getElementById('canvas');
+    const msg = document.getElementById('msg');
+    const estado = document.getElementById('estado');
+    const btnCapturar = document.getElementById('btnCapturar');
+    const btnRepetir = document.getElementById('btnRepetir');
+    const btnEnviar = document.getElementById('btnEnviar');
+
+    let stream = null;
+    let fotoData = null;
+
+    function detener() {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      video.srcObject = null;
+    }
+
+    async function iniciar() {
+      detener();
+      fotoData = null;
+      preview.classList.add('hidden');
+      video.classList.remove('hidden');
+      btnRepetir.classList.add('hidden');
+      btnEnviar.classList.add('hidden');
+      btnCapturar.classList.remove('hidden');
+      btnCapturar.disabled = true;
+      msg.classList.remove('hidden');
+      msg.innerText = 'Solicitando acceso a la cámara...';
+      estado.innerText = '';
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        msg.innerText = 'Este navegador no permite usar la cámara (se requiere HTTPS).';
+        return;
+      }
+
+      try {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+          });
+        } catch (e1) {
+          if (e1.name === 'OverconstrainedError' || e1.name === 'ConstraintNotSatisfiedError') {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          } else { throw e1; }
+        }
+        video.srcObject = stream;
+        try { await video.play(); } catch (_) {}
+        msg.classList.add('hidden');
+        btnCapturar.disabled = false;
+        estado.style.color = '#475569';
+        estado.innerText = 'Cámara lista.';
+      } catch (err) {
+        let t = 'No se pudo iniciar la cámara (' + (err.name || 'error') + ').';
+        if (err.name === 'NotAllowedError' || err.name === 'SecurityError') t = 'Permiso de cámara denegado. Pulsa el ícono de cámara/candado junto a la barra de direcciones y permite el acceso.';
+        else if (err.name === 'NotFoundError') t = 'No se encontró ninguna cámara.';
+        else if (err.name === 'NotReadableError') t = 'La cámara está siendo usada por otra aplicación o pestaña.';
+        msg.innerText = t;
+      }
+    }
+
+    btnCapturar.addEventListener('click', function () {
+      const vw = video.videoWidth || 640;
+      const vh = video.videoHeight || 480;
+      const max = 800;
+      const escala = Math.min(1, max / Math.max(vw, vh));
+      canvas.width = Math.round(vw * escala);
+      canvas.height = Math.round(vh * escala);
+      canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+      fotoData = canvas.toDataURL('image/jpeg', 0.6);
+
+      preview.src = fotoData;
+      preview.classList.remove('hidden');
+      video.classList.add('hidden');
+      detener();
+
+      btnCapturar.classList.add('hidden');
+      btnRepetir.classList.remove('hidden');
+      btnEnviar.classList.remove('hidden');
+      estado.innerText = 'Revisa la foto y confirma.';
+    });
+
+    btnRepetir.addEventListener('click', iniciar);
+
+    btnEnviar.addEventListener('click', function () {
+      if (!fotoData) return;
+      if (!window.opener || window.opener.closed) {
+        estado.style.color = '#e11d48';
+        estado.innerText = 'No se pudo comunicar con la ventana principal. Ciérrala y vuelve a abrir esta cámara desde el botón de la solicitud.';
+        return;
+      }
+      // El origen de Apps Script varía, por eso '*'. La ventana principal valida de dónde viene el mensaje.
+      window.opener.postMessage({ tipo: 'fotoCamara', data: fotoData }, '*');
+      estado.style.color = '#059669';
+      estado.innerText = '✅ Foto enviada. Puedes cerrar esta ventana.';
+      setTimeout(() => window.close(), 600);
+    });
+
+    window.addEventListener('beforeunload', detener);
+    iniciar();
+  </script>
+</body>
+</html>
